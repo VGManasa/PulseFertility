@@ -1,42 +1,91 @@
+const {
+  setDatabase
+} = require("./role3/services/workflowService");
+
+const {
+  handleWorkflowEvent,
+  handlePatientStatus
+} = require("./role3/controllers/workflowController");
+
+const dns = require("dns");
+
+// Force Node.js to use public DNS servers
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 const express = require("express");
 const { MongoClient } = require("mongodb");
 require("dotenv").config();
 
 const app = express();
-
 const PORT = 5000;
 
-// Allow Express to read JSON requests
 app.use(express.json());
 
-// MongoDB connection
+
+// ===============================
+// CHECK MONGODB URI
+// ===============================
+
+if (!process.env.MONGODB_URI) {
+    console.error("ERROR: MONGODB_URI is missing from .env");
+    process.exit(1);
+}
+
+console.log("MongoDB URI loaded successfully.");
+
 const client = new MongoClient(process.env.MONGODB_URI);
 
+
+// ===============================
+// START SERVER
+// ===============================
+
 async function startServer() {
+
     try {
+
+        console.log("Connecting to MongoDB...");
+
         await client.connect();
 
         console.log("MongoDB connected successfully!");
 
-        // Select database
-        const db = client.db("GAMMA");
 
-        // Select collection
+        // ===============================
+        // MONGODB DATABASE
+        // ===============================
+
+        const db = client.db("PulseFertility");
+
+        // Give Role 3 access to MongoDB
+        setDatabase(db);
+
         const testCollection = db.collection("test");
 
-        // Home route
+
+        // ===============================
+        // HOME ROUTE
+        // ===============================
+
         app.get("/", (req, res) => {
             res.send("GAMMA server is running!");
         });
 
-        // MongoDB test route
+
+        // ===============================
+        // MONGODB TEST ROUTE
+        // ===============================
+
         app.get("/test", async (req, res) => {
+
             try {
+
                 const result = await testCollection.insertOne({
                     message: "GAMMA MongoDB test successful!",
                     createdAt: new Date()
                 });
+
+                console.log("Document inserted:", result.insertedId);
 
                 res.json({
                     success: true,
@@ -45,66 +94,55 @@ async function startServer() {
                 });
 
             } catch (error) {
-                console.error(error);
+
+                console.error("MongoDB insert error:", error);
 
                 res.status(500).json({
                     success: false,
                     message: "Failed to insert data"
                 });
+
             }
+
         });
 
-        // ==========================================
-        // WHATSAPP WEBHOOK VERIFICATION
-        // ==========================================
 
-        app.get("/webhook", (req, res) => {
+        // ===============================
+        // ROLE 3 WORKFLOW ROUTES
+        // ===============================
 
-            const mode = req.query["hub.mode"];
-            const token = req.query["hub.verify_token"];
-            const challenge = req.query["hub.challenge"];
+        app.post(
+            "/api/role3/workflow",
+            handleWorkflowEvent
+        );
 
-            if (
-                mode === "subscribe" &&
-                token === process.env.WHATSAPP_VERIFY_TOKEN
-            ) {
-                console.log("WhatsApp webhook verified successfully!");
+        app.post(
+            "/api/role3/patient-status",
+            handlePatientStatus
+        );
 
-                res.status(200).send(challenge);
-            } else {
-                console.log("WhatsApp webhook verification failed!");
 
-                res.sendStatus(403);
-            }
-        });
+        // ===============================
+        // START EXPRESS SERVER
+        // ===============================
 
-        // ==========================================
-        // WHATSAPP INCOMING MESSAGES
-        // ==========================================
-
-        app.post("/webhook", async (req, res) => {
-
-            console.log("WhatsApp webhook received!");
+        app.listen(PORT, () => {
 
             console.log(
-                JSON.stringify(req.body, null, 2)
+                `Server running on http://localhost:${PORT}`
             );
 
-            // Immediately tell Meta we received the message
-            res.sendStatus(200);
-
-            // We will add message processing here later.
-        });
-
-        // Start server
-        app.listen(PORT, () => {
-            console.log(`Server running on http://localhost:${PORT}`);
         });
 
     } catch (error) {
-        console.error("MongoDB connection failed:", error);
+
+        console.error("MongoDB connection failed!");
+        console.error(error);
+
+        process.exit(1);
+
     }
+
 }
 
 startServer();
-
